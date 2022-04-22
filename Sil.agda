@@ -1,24 +1,17 @@
 module Sil2 where
 
 open import Agda.Builtin.Int using (Int)
-open import Agda.Builtin.Bool using (Bool; true; false)
-
 open import Data.List
   using
   (List
   ; []; _∷_
-  ; sum; map; take; reverse; _++_; drop
+  ; sum; map; take; reverse; _++_; drop; any
   )
-open import Data.List.Relation.Unary.All as All using
-  ( All; []; _∷_; lookup; updateAt
-  ; _[_]=_; here; there
-  ; Null
-  )
+
 open import Relation.Binary.PropositionalEquality as Eq using (_≡_; _≢_; refl; sym; trans; cong)
-open import Data.Unit using (⊤; tt)
 open import Data.Empty using (⊥; ⊥-elim)
 open import Data.Maybe using (Maybe; nothing; just)
-open import Data.Rational using (ℚ ; mkℚ; normalize; 1ℚ; 0ℚ; _≃_; _≥_; _>_)
+open import Data.Rational using (ℚ ; mkℚ; normalize; 1ℚ; 0ℚ; _≃_)
 open import Data.String using (String; _≟_)
 open import Data.Sum using (_⊎_; inj₁; inj₂)
 open import Data.Product using (_×_; proj₁; proj₂; _,′_)
@@ -45,8 +38,8 @@ infixl 7 _+_
 infixl 7 _*_
 infixl 7 _and_
 infixl 7 _or_
-infixl 7 _`<_
-infixl 7 _`>_
+infixl 7 _<_
+infixl 7 _>_
 infixl 7 _==_
 
 infix  5 `True
@@ -66,14 +59,15 @@ data Term : Set where
   _*_ : Term → Term → Term
   _and_ : Term → Term → Term
   _or_ : Term → Term → Term
-  _`<_ : Term → Term → Term
-  _`>_ : Term → Term → Term
+  _<_ : Term → Term → Term
+  _>_ : Term → Term → Term
   _==_ : Term → Term → Term
   `not_ : Term → Term
   `True : Term
   `False : Term
   `ref_ : Term → Term
   !_ : Term → Term
+
 
 data Stmt : Set
 
@@ -220,14 +214,14 @@ data _⊢_⦂_ : Context → Term → Type → Set where
     → Γ ⊢ M₁ ⦂ `ℕ
     → Γ ⊢ M₂ ⦂ `ℕ
       -----------
-    → Γ ⊢ M₁ `< M₂ ⦂ `𝔹
+    → Γ ⊢ M₁ < M₂ ⦂ `𝔹
 
    -- T_CMPOP (>)
   ⊢> : ∀ {Γ M₁ M₂}
     → Γ ⊢ M₁ ⦂ `ℕ
     → Γ ⊢ M₂ ⦂ `ℕ
       -----------
-    → Γ ⊢ M₁ `> M₂ ⦂ `𝔹
+    → Γ ⊢ M₁ > M₂ ⦂ `𝔹
 
 
    -- T_CMPOP (==)
@@ -294,21 +288,11 @@ data _⊢ₛ_ : Context → List Stmt → Set where
     ----------------------
     → Γ ⊢ₛ (` y := ! ` x) ∷ L
 
-
--- T_MOVETO_ASSIGN
-  ⊢ₛMOVETOASS : ∀ {A Γ L x y}
+-- T_MOVETO
+  ⊢ₛMOVETO : ∀ {A Γ L x y}
     → (Γ ∋ x ⦂ A)
-    → ¬ (Γ ∋̌ y)
+    → ¬(Γ ∋̌ y)
     → (Γ , y ⦂ A) ⊢ₛ L
-    ----------------------
-    → Γ ⊢ₛ (` x `moveto ` y) ∷ L
-
-
--- T_MOVETO_REASSIGN
-  ⊢ₛMOVETORASS : ∀ {A Γ L x y}
-    → (Γ ∋ x ⦂ A)
-    → (Γ ∋ y ⦂ A)
-    → Γ ⊢ₛ L
     ----------------------
     → Γ ⊢ₛ (` x `moveto ` y) ∷ L
 
@@ -361,6 +345,11 @@ data _⊢ₚ_ : (PermCtx × Context) → (List Stmt) → Set where
     -------------------------------------
     → (Ω ,′ Γ) ⊢ₚ  (`free ` x) ∷ L
 
+  -- T_SKIPONLY
+  ⊢ₚ§ : ∀ {Ω Γ}
+       --------
+    → (Ω ,′ Γ) ⊢ₚ  `skip ∷ []
+
   -- T_SKIPREST
   ⊢ₚ§→ : ∀ {Γ Ω L}
     → (Ω ,′ Γ)  ⊢ₚ L
@@ -368,42 +357,27 @@ data _⊢ₚ_ : (PermCtx × Context) → (List Stmt) → Set where
     → (Ω ,′ Γ) ⊢ₚ `skip ∷ L
 
   -- T_ASSIGN
-  ⊢ₚASS : ∀ {Γ Ω L M A x q}
+  ⊢ₚASS : ∀ {Γ Ω L M A x}
     → Γ ⊢ M ⦂ A
-    → Ω ∋ₚ x ⦂ₚ q
-    → q ≥ 0ℚ
     → (Ω ,′ Γ)  ⊢ₚ L
     ----------------------
     → (Ω ,′ Γ) ⊢ₚ (` x ::= M) ∷ L
 
   -- T_READ
-  ⊢ₚREAD : ∀ {Γ Ω L x y q}
+  ⊢ₚREAD : ∀ {Γ Ω L x y}
     → Γ ∋̌ x
-    → Ω ∋ₚ x ⦂ₚ q
-    → q ≥ 0ℚ
     → (Ω ,′ Γ) ⊢ₚ L
     ----------------------
     → (Ω ,′ Γ) ⊢ₚ (` y := ! ` x) ∷ L
 
 -- T_MOVETO
-  ⊢ₚMOVETORASS : ∀ {Γ Ω L x y}
-    → (Γ ∋̌ x)
-    → (Γ ∋̌ y)
-    → Ω ∋ₚ x ⦂ₚ 1ℚ
-    → Ω ∋ₚ y ⦂ₚ 0ℚ
-    → ((Ω , x ⦂ₚ 0ℚ , y ⦂ₚ 1ℚ) ,′ Γ) ⊢ₚ L
-    ----------------------
-    → (Ω ,′ Γ) ⊢ₚ (` x `moveto ` y) ∷ L
-
--- T_MOVETO
-  ⊢ₚMOVETOASS : ∀ {Γ Ω L x y}
+  ⊢ₚMOVETO : ∀ {Γ Ω L x y}
     → (Γ ∋̌ x)
     → ¬ (Γ ∋̌ y)
     → Ω ∋ₚ x ⦂ₚ 1ℚ
     → ((Ω , x ⦂ₚ 0ℚ , y ⦂ₚ 1ℚ) ,′ Γ) ⊢ₚ L
     ----------------------
     → (Ω ,′ Γ) ⊢ₚ (` x `moveto ` y) ∷ L
-
 
 
 notin : ∀ {Ω p q x} → ¬ (p ≡ q) → ¬ (Ω , x ⦂ₚ p ∋ₚ x ⦂ₚ q)
@@ -455,20 +429,6 @@ data _∈ₗ_ :  Stmt → (List Stmt) → Set where
     → x ∈ₗ (y ∷ L)
 
 
-data _∉ₗ_ :  Stmt → (List Stmt) → Set where
-
-  Z : ∀ {x}
-      ------------------
-    → x ∉ₗ []
-
-  S : ∀ {x y L}
-    → x ≢ y
-    → x ∉ₗ L
-      ------------------
-    → x ∉ₗ (y ∷ L)
-
-
-
 nofree : ∀ {Ω Γ L x}
  → ¬ (((Ω , x ⦂ₚ 0ℚ) ,′ Γ) ⊢ₚ (`free ` x) ∷ L)
 nofree (⊢ₚFREE x x₁ x₂) = notin zeronotone x₁
@@ -493,109 +453,32 @@ diffid2 {x} {.x} refl = refl
 difffree : ∀ {x y} → `free ` x ≢ `free ` y → x ≢ y
 difffree edf refl = edf refl
 
-diffmove0 : ∀ {x y a b} → x ≡ y  → ` a `moveto ` x ≡ ` b `moveto ` y → a ≡ b
-diffmove0 x≡y em = {!!}
-
-diffmove : ∀ {x y a b} →  a ≢ b → ` a `moveto ` x ≢ ` b `moveto ` y → x ≢ y
-diffmove {x} {y} {a} {b} a≢b em x₁ = a≢b {!!}
-
-samefree : ∀ {x y} → `free ` x ≡ `free ` y → x ≡ y
-samefree {x} {.x} refl = refl
-
-data _⟪_∈ₗ_ :  Stmt → Stmt → (List Stmt) → Set where
-
-  Z : ∀ {x y L}
-      ------------------
-    → x ⟪ y ∈ₗ (x ∷ L)
-
-  S : ∀ {x y z L}
-    → x ≢ y
-    → x ≢ z
-    → y ≢ z
-    → x ⟪ y ∈ₗ L
-      ------------------
-    → x ⟪ y ∈ₗ (z ∷ L)
-
-T : Bool → Set
-T true   =  ⊤
-T false  =  ⊥
-
-≡→T : ∀ {b : Bool} → b ≡ true → T b
-≡→T refl  =  tt
-
-T→≡ : ∀ (b : Bool) → T b → b ≡ true
-T→≡ true tt   =  refl
-T→≡ false ()
-
-_⇒_   : Set → Set
-x  ⇒ b = b
-y ⇒ _ = true
-
-infixl 4 free_beforemovein_
-
-data free_beforemovein_ : Term → (List Stmt) → Set where
-
-  Z : ∀ {x L}
-      ------------------
-    → free x beforemovein ((`free x) ∷ L)
-
-  S : ∀ {x y a b s L}
-    → (`free x) ≢ s
-    -- → ((s ≡ (` a `moveto ` b)))  ⇒ x ≢ b
-    → free x beforemovein L
-      ------------------
-    → free x beforemovein (s ∷ L)
-
 ⊢-no-free-without-perm : ∀ {Γ Ω L x}
   → (Γ ∋̌ x)
   → (Ω ,′ Γ) ⊢ₚ L
   → Ω ∋ₚ x ⦂ₚ 0ℚ
   ----------------------
-  → ¬ (free ` x beforemovein L)
+  →  ¬( (`free ` x) ∈ₗ L)
 
+⊢-no-free-without-perm xexists (⊢ₚFREE x x₁ l) ¬permx Z = zeronotone (∋ₚ-injective ¬permx x₁)
+⊢-no-free-without-perm xexists (⊢ₚREF x₂ x₃ l) ¬permx (S x x₁) =
+  ⊢-no-free-without-perm xexists l (yesin (diffid xexists x₃) ¬permx) x₁
+⊢-no-free-without-perm xexists (⊢ₚFREE x₂ x₃ l) ¬permx (S x x₁) =
+  ⊢-no-free-without-perm xexists l (yesin (difffree x) ¬permx) x₁
+⊢-no-free-without-perm xexists (⊢ₚ§→ l) ¬permx (S x x₁) =
+  ⊢-no-free-without-perm xexists l ¬permx x₁
+⊢-no-free-without-perm xexists (⊢ₚASS x₂ l) ¬permx (S x x₁) = ⊢-no-free-without-perm xexists l ¬permx x₁
+⊢-no-free-without-perm xexists (⊢ₚREAD x₂ l) ¬permx (S x x₁) = ⊢-no-free-without-perm xexists l ¬permx x₁
+⊢-no-free-without-perm xexists (⊢ₚMOVETO x₂ x₃ x₄ l) ¬permx (S x x₁) =
+  ⊢-no-free-without-perm xexists l (
+    yesin (diffid xexists x₃) (
+      yesin (¬∋ₚ-injective zeronotone ¬permx x₄) ¬permx)) x₁
 
-⊢-no-free-without-perm ex l ez ef = {!!}
-
--- ⊢-no-free-without-perm xexists (⊢ₚFREE x x₁ l) ¬permx permy (inj₁ Z) = zeronotone (∋ₚ-injective ¬permx x₁)
--- ⊢-no-free-without-perm xexists (⊢ₚREF x₂ x₃ l) ¬permx permy (inj₁ (S x x₁)) =
---   ⊢-no-free-without-perm xexists l {!!} {!!} {!!}
---   -- ⊢-no-free-without-perm xexists l (yesin (diffid xexists x₃) ¬permx)(inj₁ x₁)
--- ⊢-no-free-without-perm xexists (⊢ₚFREE x₂ x₃ l) ¬permx permy (inj₁ (S x x₁)) = {!!}
---   -- ⊢-no-free-without-perm xexists l (yesin (difffree x) ¬permx) (inj₁ x₁)
--- ⊢-no-free-without-perm xexists (⊢ₚ§→ l) ¬permx permy (inj₁ (S x x₁)) = {!!}
--- -- ⊢-no-free-without-perm xexists l ¬permx (inj₁ x₁)
--- ⊢-no-free-without-perm xexists (⊢ₚASS x₂ l) ¬permx permy (inj₁ (S x x₁)) = {!!}
--- -- ⊢-no-free-without-perm xexists l ¬permx (inj₁ x₁)
--- ⊢-no-free-without-perm xexists (⊢ₚREAD x₂ l) ¬permx permy (inj₁ (S x x₁)) = {!!}
--- -- ⊢-no-free-without-perm xexists l ¬permx (inj₁ x₁)
--- ⊢-no-free-without-perm xexists (⊢ₚMOVETOASS x₂ x₃ x₄ l) ¬permx permy (inj₁ (S x x₁)) = {!!}
---   -- ⊢-no-free-without-perm xexists l (yesin (diffid xexists x₃) (yesin (¬∋ₚ-injective zeronotone ¬permx x₄) ¬permx)) (inj₁ x₁)
--- ⊢-no-free-without-perm xexists (⊢ₚMOVETORASS x₂ x₃ x₄ x₅ l) ¬permx permy (inj₁ x₇) = {!!}
--- -- ⊢-no-free-without-perm xexists l (yesin {!!} {!!}) {!!}
--- ⊢-no-free-without-perm xexists l ¬permx permy (inj₂ y) = {!!}
-
--- ⊢-no-free-without-perm xexists (⊢ₚFREE x x₁ l) ¬permx enomv Z = zeronotone (∋ₚ-injective ¬permx x₁)
--- ⊢-no-free-without-perm xexists (⊢ₚREF x₂ x₃ l) ¬permx (S x₄ enomv) (S x x₁) = {!!}
---   -- ⊢-no-free-without-perm xexists l (yesin (diffid xexists x₃) ¬permx) {!!} x₁
--- ⊢-no-free-without-perm xexists (⊢ₚFREE x₂ x₃ l) ¬permx enomv (S x x₁) = {!!}
---   -- ⊢-no-free-without-perm xexists l (yesin (difffree x) ¬permx) x₁
--- ⊢-no-free-without-perm xexists (⊢ₚ§→ l) ¬permx enomv (S x x₁) = {!!}
---   -- ⊢-no-free-without-perm xexists l ¬permx x₁
--- ⊢-no-free-without-perm xexists (⊢ₚASS x₂ l) ¬permx enomv (S x x₁) = {!!}
--- -- ⊢-no-free-without-perm xexists l ¬permx x₁
--- ⊢-no-free-without-perm xexists (⊢ₚREAD x₂ l) ¬permx enomv (S x x₁) = {!!}
--- -- ⊢-no-free-without-perm xexists l ¬permx x₁
--- ⊢-no-free-without-perm xexists (⊢ₚMOVETOASS x₂ x₄ x₅ l) ¬permx enomv (S x x₁) = {!!}
--- -- ⊢-no-free-without-perm xexists l (
--- --    yesin {!!} (
--- --      yesin (¬∋ₚ-injective zeronotone ¬permx x₄) ¬permx)) x₁
--- ⊢-no-free-without-perm xexists (⊢ₚMOVETORASS x₂ x₄ x₅ x₆ l) ¬permx enomv (S x x₁) = {!!}
-
--- ⊢no-double-free : ∀ {Γ Ω L x q}
---   → ((Ω , x ⦂ₚ q) ,′ Γ) ⊢ₚ (`free ` x) ∷ L
---  ------------------------------------------------------------------------------
---   → ¬ ( (`free ` x) ∈ₗ L)
--- ⊢no-double-free (⊢ₚFREE x x₁ ef) l = ⊢-no-free-without-perm x ef (Zₚ refl) l
+⊢no-double-free : ∀ {Γ Ω L x q}
+  → ((Ω , x ⦂ₚ q) ,′ Γ) ⊢ₚ (`free ` x) ∷ L
+ ------------------------------------------------------------------------------
+  → ¬ ( (`free ` x) ∈ₗ L)
+⊢no-double-free (⊢ₚFREE x x₁ ef) l = ⊢-no-free-without-perm x ef (Zₚ refl) l
 
 
 -- leaks
