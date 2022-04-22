@@ -1,4 +1,4 @@
-module Sil2 where
+module Sil where
 
 open import Agda.Builtin.Int using (Int)
 open import Data.List
