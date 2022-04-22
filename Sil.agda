@@ -1,4 +1,11 @@
-module Sil2 where
+-- This is a formal development of ownership added to an augmented SIL language
+-- To demonstrate references, the following syntax has been added
+-- <stmt> ::= ... | <var> := ref <intexp> (alloc + init; has full ownership)
+--                | <var> ::= <intexp> (ref write i.e. *var = value in C)
+--                | <var> := !<var> (ref read)
+--                | free <var> (release allocated memory)
+--                | <var> moveto <var> (e.g. x moveto y moves ownership of memory from x to y)
+module Sil where
 
 open import Agda.Builtin.Int using (Int)
 open import Data.List
@@ -25,7 +32,6 @@ Id = String
 
 
 -- Syntax of terms.
-
 
 infix 10 _i
 infix  9  `_
@@ -68,7 +74,7 @@ data Term : Set where
   `ref_ : Term → Term
   !_ : Term → Term
 
-
+-- Syntax of Statements.
 data Stmt : Set
 
 data Stmt where
@@ -113,15 +119,6 @@ data _∋_⦂_ : Context → Id → Type → Set where
       ------------------
     → Γ , y ⦂ B ∋ x ⦂ A
 
-S′ : ∀ {Γ x y A B}
-   → {x≢y : False (x ≟ y)}
-   → Γ ∋ x ⦂ A
-     ------------------
-   → Γ , y ⦂ B ∋ x ⦂ A
-
-S′ {x≢y = x≢y} x = S (toWitnessFalse x≢y) x
-
-
 -- Define belongs to.
 
 data _∋̌_ : Context → Id → Set where
@@ -137,7 +134,7 @@ data _∋̌_ : Context → Id → Set where
     → Γ , y ⦂ A ∋̌ x
 
 
--- The typing judgment.
+-- The typing judgment for expressions.
 
 infix  4  _⊢_⦂_
 
@@ -232,7 +229,7 @@ data _⊢_⦂_ : Context → Term → Type → Set where
     → Γ ⊢ M₁ == M₂ ⦂ `𝔹
 
 
--- Statements typing judgement
+-- Statements typing judgement for SIL
 infix  4  _⊢ₛ_
 
 data _⊢ₛ_ : Context → List Stmt → Set where
@@ -297,15 +294,14 @@ data _⊢ₛ_ : Context → List Stmt → Set where
     → Γ ⊢ₛ (` x `moveto ` y) ∷ L
 
 
--- define parent context to store child_id ⇨ parent_id pairs
-data ParentCtx : Set where
-  ∅     : ParentCtx
-  _,_⦂ₚᵣ_ : ParentCtx → Id  → (Maybe Id) → ParentCtx
-
+-- Helper definitions for Ownership.
 
 infixl 5  _,_⦂ₚ_
 
--- define Permission context
+-- define Permission context (Ω).
+-- A permission type is Id : Rational Number (ℚ)
+-- Rational numbers will help us when borrow is added, which
+-- is taking away some permission without ever it reaching 0, e.g. by dividing.
 data PermCtx : Set where
   ∅     : PermCtx
   _,_⦂ₚ_ : PermCtx → Id → ℚ → PermCtx
@@ -326,7 +322,13 @@ data _∋ₚ_⦂ₚ_ : PermCtx → Id → ℚ → Set where
     → Ω , y ⦂ₚ B ∋ₚ x ⦂ₚ A
 
 
-
+-- Ownership Typing judgements for statements
+-- I imagine the typechecker will be run twice
+-- First, we will run ⊢ₛ to fill up Γ
+-- Second, we will use Γ and ⊢ₚ to fill up Ω
+-- This typing judgement just passes Γ around,
+-- occasionally looking up things but never
+-- modifying it.
 infix  4  _⊢ₚ_
 data _⊢ₚ_ : (PermCtx × Context) → (List Stmt) → Set where
 
@@ -371,6 +373,12 @@ data _⊢ₚ_ : (PermCtx × Context) → (List Stmt) → Set where
     → (Ω ,′ Γ) ⊢ₚ (` y := ! ` x) ∷ L
 
 -- T_MOVETO
+-- This is a simple version of moveto.
+-- We constraint that the new owner must be fresh.
+-- This simplifies proofs at the cost of expressiveness.
+-- Specifically it restricts passing ownership from a child context
+-- (e.g. inside a begin..end block of if statement)
+-- to the parent context.
   ⊢ₚMOVETO : ∀ {Γ Ω L x y}
     → (Γ ∋̌ x)
     → ¬ (Γ ∋̌ y)
@@ -387,21 +395,6 @@ notin p≢q (Sₚ x b) = x refl
 zeronotone : ¬  0ℚ ≡ 1ℚ
 zeronotone = λ ()
 
--- ⊢no-double-free : ∀ {Γ Δ Ω L x q}
---   → (Γ ∋̌  x)
---   → (Ω , x ⦂ₚ q) ⊢ₚ (`free ` x) ∷ L
---  ------------------------------------------------------------------------------
---   → ¬ (Ω ⊢ₚ (`free ` x) ∷ (`free ` x) ∷ L)
--- ⊢no-double-free xexists (⊢ₚFREE x x₁ secfree) (⊢ₚFREE x₂ x₃ (⊢ₚFREE x₄ x₅ firstfree)) = notin zeronotone x₅
-
-
-rat-eq-sym : ∀ (p q : ℚ) → p ≡ q → q ≡ p
-rat-eq-sym p q x = sym x
-
-
-rat-eq-trans : ∀ (p q r : ℚ) → p ≡ q → q ≡ r → p ≡ r
-rat-eq-trans p q r  p≡q q≡r = trans p≡q q≡r
-
 -- Lookup is injective (a helper for what follows)
 ∋ₚ-injective : ∀ {Ω x p q} → Ω ∋ₚ x ⦂ₚ p → Ω ∋ₚ x ⦂ₚ q → p ≡ q
 ∋ₚ-injective (Zₚ x) (Zₚ x₁) rewrite sym x = x₁
@@ -409,7 +402,7 @@ rat-eq-trans p q r  p≡q q≡r = trans p≡q q≡r
 ∋ₚ-injective (Sₚ x ep) (Zₚ x₁) = ⊥-elim (x refl)
 ∋ₚ-injective (Sₚ x ep) (Sₚ x₁ eq) = ∋ₚ-injective ep eq
 
--- Lookup is injective (a helper for what follows)
+-- (Another helper for what follows)
 ¬∋ₚ-injective : ∀ {Ω x y p q} → p ≢ q → Ω ∋ₚ x ⦂ₚ p → Ω ∋ₚ y ⦂ₚ q → x ≢ y
 ¬∋ₚ-injective p≢q (Zₚ x) (Zₚ x₁) x≡y = p≢q (trans (sym x) x₁)
 ¬∋ₚ-injective p≢q (Zₚ x) (Sₚ x₁ ey) x≡y = ⊥-elim (x₁ (sym x≡y))
@@ -429,10 +422,20 @@ data _∈ₗ_ :  Stmt → (List Stmt) → Set where
     → x ∈ₗ (y ∷ L)
 
 
+-- sanity check
 nofree : ∀ {Ω Γ L x}
  → ¬ (((Ω , x ⦂ₚ 0ℚ) ,′ Γ) ⊢ₚ (`free ` x) ∷ L)
 nofree (⊢ₚFREE x x₁ x₂) = notin zeronotone x₁
 
+-- helper functions to prove double free is caught
+
+-- equality is symmetric for rationals
+rat-eq-sym : ∀ (p q : ℚ) → p ≡ q → q ≡ p
+rat-eq-sym p q x = sym x
+
+-- equality is transitive for rationals
+rat-eq-trans : ∀ (p q r : ℚ) → p ≡ q → q ≡ r → p ≡ r
+rat-eq-trans p q r  p≡q q≡r = trans p≡q q≡r
 
 yesin : ∀ {Ω p q x y} → x ≢ y  → (Ω ∋ₚ x ⦂ₚ p) → (Ω , y ⦂ₚ q ∋ₚ x ⦂ₚ p)
 yesin {.(_ , x ⦂ₚ _)} {p} {q} {x} {y} x≢y (Zₚ x₁) = Sₚ x≢y (Zₚ x₁)
@@ -453,6 +456,12 @@ diffid2 {x} {.x} refl = refl
 difffree : ∀ {x y} → `free ` x ≢ `free ` y → x ≢ y
 difffree edf refl = edf refl
 
+-- helper for double free is caught.
+-- We prove inductively the following
+-- Base case: L = free x :: [] where x has zero permissions and typechecks is absurd (⊥)
+-- Inductive case: L = y :: L if ⊢-no-free-without-perm on L is absurd (⊥) then
+-- adding a statement y in front retains the absurdity (⊥)
+-- We use case analysis for all possible y to prove this.
 ⊢-no-free-without-perm : ∀ {Γ Ω L x}
   → (Γ ∋̌ x)
   → (Ω ,′ Γ) ⊢ₚ L
@@ -474,11 +483,10 @@ difffree edf refl = edf refl
     yesin (diffid xexists x₃) (
       yesin (¬∋ₚ-injective zeronotone ¬permx x₄) ¬permx)) x₁
 
+-- This is our main result
+-- A free x will only typecheck if no free x is within the rest of the program.
 ⊢no-double-free : ∀ {Γ Ω L x q}
   → ((Ω , x ⦂ₚ q) ,′ Γ) ⊢ₚ (`free ` x) ∷ L
  ------------------------------------------------------------------------------
   → ¬ ( (`free ` x) ∈ₗ L)
 ⊢no-double-free (⊢ₚFREE x x₁ ef) l = ⊢-no-free-without-perm x ef (Zₚ refl) l
-
-
--- leaks
