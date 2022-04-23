@@ -1,8 +1,8 @@
 # SIL + Ownership in Agda
 
 `Agda` can be installed following the guide at 
-`https://plfa.github.io/GettingStarted/`
+[PLFA](https://plfa.github.io/GettingStarted/)
 
-Typecheck and load the file using `C-c C-l` in emacs.
+Typecheck and load the file using `C-c C-l` in Emacs.
 
-The file contains inline documentation.
+The file `Sil.agda` contains inline documentation.
